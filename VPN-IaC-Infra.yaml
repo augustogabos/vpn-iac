@@ -1,0 +1,90 @@
+name: "VPN IaC"
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'windows-latest'
+
+steps:
+- task: AzurePowerShell@5
+  inputs:
+    azureSubscription: 'service-connection-here'
+    azurePowerShellVersion: LatestVersion
+    ScriptType: 'InlineScript'
+    Inline: |
+      $RG = "rg-name-here"
+      $VNetName1  = "VNET1"
+      $VNetName2  = "VNET2"
+
+      $VNET01SubName01 = "VNET01Sub01"
+      $VNET01SubName02 = "VNET01Sub02"
+
+      $VNET02SubName01 = "VNET02Sub01"
+      $VNET02SubName02 = "VNET02Sub02"
+
+      $VNET1GWSubName = "GatewaySubnet"
+      $VNET2GWSubName = "GatewaySubnet"
+
+      $VNET01Prefix = "10.10.0.0/25"
+      $VNET01Sub01Prefix = "10.10.0.0/27"
+      $VNET01Sub02Prefix = "10.10.0.32/27"
+      $GWSubPrefix01 = "10.10.0.64/27"
+
+      $VNET02Prefix = "10.20.0.0/25"
+      $VNET02Sub01Prefix = "10.20.0.0/27"
+      $VNET02Sub02Prefix = "10.20.0.32/27"
+      $GWSubPrefix02 = "10.20.0.64/27"
+
+      $Location = "EastUS"
+      $GWName1 = "VNET01GW"
+      $GWName2 = "VNET02GW"
+      $GWIPName1 = "VNET01GWIP"
+      $GWIPName2 = "VNET02GWIP"
+      $GWIPconfName1 = "gwipconfig01"
+      $GWIPconfName2 = "gwipconfig02"
+      $Connection12 = "VNET1toVNET2"
+      $Connection21 = "VNET2toVNET1"
+
+      $virtualNetwork1 = New-AzVirtualNetwork `
+      -ResourceGroupName $RG `
+      -Location $Location `
+      -Name $VNetName1 `
+      -AddressPrefix $VNET01Prefix
+
+    
+      Add-AzVirtualNetworkSubnetConfig `
+      -Name $VNET1GWSubName `
+      -AddressPrefix $VNET01Sub01Prefix `
+      -VirtualNetwork $virtualNetwork1
+
+    
+      $virtualNetwork1 | Set-AzVirtualNetwork
+
+    
+      $gwpip1= New-AzPublicIpAddress `
+      -Name $GWIPName1 `
+      -ResourceGroupName $RG `
+      -Location $Location `
+      -AllocationMethod Dynamic
+
+    
+      $vnet1 = Get-AzVirtualNetwork `
+      -Name $VNetName1 `
+      -ResourceGroupName $RG
+
+      $subnet1 = Get-AzVirtualNetworkSubnetConfig `
+      -Name $VNET1GWSubName `
+      -VirtualNetwork $vnet1
+
+      $gwipconfig1 = New-AzVirtualNetworkGatewayIpConfig `
+      -Name $GWIPconfName1 `
+      -SubnetId $subnet1.Id `
+      -PublicIpAddressId $gwpip1.Id
+
+    
+      New-AzVirtualNetworkGateway -Name $GWName1 -ResourceGroupName $RG `
+      -Location $Location -IpConfigurations $gwipconfig1 -GatewayType Vpn `
+      -VpnType RouteBased -GatewaySku Basic

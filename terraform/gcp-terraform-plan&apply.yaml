@@ -1,0 +1,26 @@
+steps:
+- task: charleszipp.azure-pipelines-tasks-terraform.azure-pipelines-tasks-terraform-installer.TerraformInstaller@0
+  displayName: "Install Terraform"
+  inputs:
+    terraformVersion: "1.3.9"
+    terraformDownloadLocation: "https://releases.hashicorp.com/terraform"
+
+- task: DownloadSecureFile@1
+  name: tfInput
+  displayName: 'Download Secure Input'
+  inputs:
+    secureFile: 'variables.tf'
+    retryCount: '2'
+
+- script: |
+    cat $(tfinput.secureFilePath) << EOT >> $(Build.Repository.LocalPath)/terraform/variables.tf
+    EOT
+    azure_public_ip=$(cat "$(Build.ArtifactStagingDirectory)/azure-public-ip-address.txt")
+    export GOOGLE_APPLICATION_CREDENTIALS=$(authkey.secureFilePath)
+  
+    cd $(Build.Repository.LocalPath)/terraform
+    terraform init
+    terraform plan -input=false -out=$(Build.Repository.LocalPath)/terraform/terraform.tfplan -var="azure_vpn_gateway_ip=${azure_public_ip}"
+    terraform apply -auto-approve $(Build.Repository.LocalPath)/terraform/terraform.tfplan
+  workingDirectory: $(System.DefaultWorkingDirectory)/terraform
+  displayName: "Terraform Script"

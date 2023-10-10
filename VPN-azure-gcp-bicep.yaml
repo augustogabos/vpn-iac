@@ -1,0 +1,72 @@
+name: Deploy VPN Between Azure and GCP
+
+trigger:
+- main
+
+variables:
+  VPN_IP_ADDRESS: ''
+  vmImageName: 'ubuntu-latest'
+  azureServiceConnection: 'service-connection-here'
+  resourceGroup: 'rg-name-here'
+  location: 'eastus'
+  templateFile: './main.bicep'
+  secureFileName: 'variables.tf'
+
+pool:
+  vmImage: $(vmImageName)
+
+steps:
+- task: DownloadSecureFile@1
+  name: authkey
+  displayName: 'Download Service Account Key'
+  inputs:
+    secureFile: 'credentials.json'
+    retryCount: '2'
+
+- script: |
+    gcloud auth activate-service-account \
+    --key-file=$(authkey.secureFilePath)
+    echo "The SA key file for this account is $(authkey.secureFilePath), SA is all set."
+
+    gcloud compute addresses create vpn-ipv4 --region=us-east1 --project=infrastructure
+
+    VPN_IP_ADDRESS=$(gcloud compute addresses describe vpn-ipv4 --region=us-east1 --project=infrastructure --format='get(address)')
+    echo "##vso[task.setvariable variable=VPN_IP_ADDRESS;]$VPN_IP_ADDRESS"
+  displayName: 'GCP VPN IP'
+
+- task: AzureCLI@2
+  displayName: 'Deploy Bicep script'
+  inputs:
+    azureSubscription: '$(azureServiceConnection)'
+    scriptLocation: 'inlineScript'
+    scriptType: 'bash'
+    inlineScript: |
+      az deployment group create \
+      --name vpn-azure-gcp \
+      --resource-group $(resourceGroup) \
+      --template-file $(templateFile) \
+      --parameters gcp_vpn_gateway_ip=$(VPN_IP_ADDRESS)
+
+- task: AzureCLI@2
+  displayName: 'Create Azure Public IP'
+  inputs:
+    azureSubscription: '$(azureServiceConnection)'
+    scriptLocation: 'inlineScript'
+    scriptType: 'bash'
+    inlineScript: |
+      ipAddress=$(az network public-ip show \
+      --resource-group=$(resourceGroup) \
+      --name "$(az deployment group show --name vpn-azure-gcp --resource-group $(resourceGroup) --query properties.outputs.vpnPublicIPName.value -o tsv)" \
+      --query ipAddress -o tsv)
+      echo "##vso[task.setvariable variable=publicIpAddress]$ipAddress"
+      echo $ipAddress > "$(Build.ArtifactStagingDirectory)/azure-public-ip-address.txt"
+
+- task: PublishBuildArtifacts@1
+  displayName: "Publish Azure Public IP"
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: "azure-public-ip"
+  condition: succeeded()
+
+- template: terraform/gcp-terraform-plan&apply.yaml
+
